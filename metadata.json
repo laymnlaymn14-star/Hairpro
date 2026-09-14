@@ -1,0 +1,6 @@
+{
+  "name": "HAIR PRO",
+  "description": "كتاب رقمي تعليمي احترافي شامل للعناية بالشعر وتصفيفه من الصفر إلى الاحتراف بالدارجة الجزائرية",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
