@@ -1,36 +1,5 @@
 export interface VisualElement {
-  type: 
-    | 'hair-anatomy'
-    | 'growth-cycle'
-    | 'hair-types'
-    | 'porosity-scale'
-    | 'density-thickness'
-    | 'hair-conditions'
-    | 'tools-guide'
-    | 'brush-selection'
-    | 'product-ladder'
-    | 'wash-steps'
-    | 'detangle-steps'
-    | 'drying-methods'
-    | 'blowdry-angles'
-    | 'heat-dial'
-    | 'sleep-protection'
-    | 'hairstyle-diagram'
-    | 'braid-sequence'
-    | 'curl-types'
-    | 'wave-methods'
-    | 'straight-profiles'
-    | 'length-styles'
-    | 'occasion-styles'
-    | 'accessories-grid'
-    | 'mistake-card'
-    | 'routine-flow'
-    | 'project-breakdown'
-    | 'rescue-matrix'
-    | 'safety-rules'
-    | 'checklist-card'
-    | 'glossary-cards'
-    | 'custom-illustration';
+  type: string;
   title?: string;
   data?: any;
   caption?: string;
@@ -69,3 +38,45 @@ export interface Chapter {
   description: string;
   category: string;
 }
+
+export interface PageContentBlock {
+  type: 'title' | 'summary' | 'paragraph' | 'visual' | 'application' | 'mistakes' | 'checklist' | 'result' | 'final_cover';
+  text?: string;
+  isPartial?: boolean;
+  continuationNote?: string;
+  visual?: VisualElement;
+  application?: {
+    title?: string;
+    steps: string[];
+    isContinuation?: boolean;
+    startStepIndex?: number;
+  };
+  mistakes?: {
+    bad: string;
+    fix: string;
+    why?: string;
+  };
+  checklist?: {
+    title?: string;
+    items: string[];
+    isContinuation?: boolean;
+    startIndex?: number;
+  };
+  imageSrc?: string;
+}
+
+export interface DisplayPage {
+  id: string;
+  originalPageId: string;
+  originalPageIndex: number;
+  chapterNumber: number;
+  chapterTitle: string;
+  pageTitle: string;
+  category: string;
+  isContinuation: boolean;
+  partIndex: number;
+  totalParts: number;
+  blocks: PageContentBlock[];
+  isFinalCoverPage?: boolean;
+}
+

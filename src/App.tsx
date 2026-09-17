@@ -1,35 +1,100 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Chapter } from './types';
 import { BOOK_PAGES, CHAPTERS_LIST, BOOK_WATERMARK } from './data/bookData';
 import { PageRenderer } from './components/PageRenderer';
 import { BookCover } from './components/BookCover';
 import { TableOfContents } from './components/TableOfContents';
 import { SearchModal } from './components/SearchModal';
+import { PWAInstallButton } from './components/PWAInstallButton';
+import { generatePaginatedBook, DisplayPage } from './utils/paginationEngine';
 import { 
-  ChevronRight, ChevronLeft, BookOpen, Search, Bookmark, 
+  BookOpen, Search, Bookmark, 
   BookmarkCheck, Sparkles, Home, 
   ChevronsRight, ChevronsLeft, Columns, Square, Maximize2, Minimize2, Heart
 } from 'lucide-react';
 
+interface FlipTransition {
+  isFlipping: boolean;
+  direction: 'next' | 'prev';
+  fromIndex: number;
+  toIndex: number;
+}
+
 export default function App() {
-  // Persistence state
+  // Screen and Container Dimensions for Dynamic Typesetting
+  const [viewportSize, setViewportSize] = useState(() => ({
+    width: typeof window !== 'undefined' ? window.innerWidth : 800,
+    height: typeof window !== 'undefined' ? window.innerHeight : 800
+  }));
+
+  const bookContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Resize listener for fluid responsive calculations
+  useEffect(() => {
+    let timeoutId: any;
+    const handleResize = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        setViewportSize({
+          width: window.innerWidth,
+          height: window.innerHeight
+        });
+      }, 100);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      clearTimeout(timeoutId);
+    };
+  }, []);
+
+  // Compute fixed usable height for typesetting
+  const usableHeight = useMemo(() => {
+    // Stage height inside the fixed container frame (560px to 700px)
+    let frameH = 620;
+    if (viewportSize.height < 650) frameH = 540;
+    else if (viewportSize.height >= 850) frameH = 680;
+    // Inside card: header (~40px), footer (~40px), padding (~48px)
+    return Math.max(340, frameH - 128);
+  }, [viewportSize.height]);
+
+  const contentWidth = useMemo(() => {
+    const maxW = Math.min(640, viewportSize.width - 32);
+    return Math.max(260, maxW - 48);
+  }, [viewportSize.width]);
+
+  // Generate complete smart-paginated book (with final cover page at the end)
+  const paginatedPages: DisplayPage[] = useMemo(() => {
+    return generatePaginatedBook(BOOK_PAGES, usableHeight, contentWidth);
+  }, [usableHeight, contentWidth]);
+
+  // Current Display Page Index
   const [currentPageIndex, setCurrentPageIndex] = useState<number>(() => {
-    const saved = localStorage.getItem('hair_pro_last_page');
+    const saved = localStorage.getItem('eloria_last_page') || localStorage.getItem('hair_pro_last_page');
     if (saved !== null) {
       const parsed = parseInt(saved, 10);
-      if (!isNaN(parsed) && parsed >= 0 && parsed < BOOK_PAGES.length) {
+      if (!isNaN(parsed) && parsed >= 0) {
         return parsed;
       }
     }
     return 0;
   });
 
+  // Clamp currentPageIndex if paginatedPages length changes
+  useEffect(() => {
+    if (paginatedPages.length > 0 && currentPageIndex >= paginatedPages.length) {
+      setCurrentPageIndex(paginatedPages.length - 1);
+    }
+  }, [paginatedPages.length, currentPageIndex]);
+
   const [isCoverView, setIsCoverView] = useState<boolean>(() => {
-    return localStorage.getItem('hair_pro_visited') !== 'true';
+    return (localStorage.getItem('eloria_visited') || localStorage.getItem('hair_pro_visited')) !== 'true';
   });
 
   const [bookmarks, setBookmarks] = useState<number[]>(() => {
     try {
-      const saved = localStorage.getItem('hair_pro_bookmarks');
+      const saved = localStorage.getItem('eloria_bookmarks') || localStorage.getItem('hair_pro_bookmarks');
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -41,67 +106,93 @@ export default function App() {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isTwoPageMode, setIsTwoPageMode] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [flipAnimation, setFlipAnimation] = useState<'next' | 'prev' | null>(null);
+
+  // Realistic 3D Page Turn State
+  const [flipTransition, setFlipTransition] = useState<FlipTransition>({
+    isFlipping: false,
+    direction: 'next',
+    fromIndex: currentPageIndex,
+    toIndex: currentPageIndex
+  });
 
   // Swipe gesture tracking
   const touchStartXRef = useRef<number | null>(null);
-  const bookContainerRef = useRef<HTMLDivElement | null>(null);
+  const touchStartYRef = useRef<number | null>(null);
 
   // Save current page to localStorage
   useEffect(() => {
-    localStorage.setItem('hair_pro_last_page', currentPageIndex.toString());
-    localStorage.setItem('hair_pro_visited', 'true');
+    localStorage.setItem('eloria_last_page', currentPageIndex.toString());
+    localStorage.setItem('eloria_visited', 'true');
   }, [currentPageIndex]);
 
   // Save bookmarks to localStorage
   useEffect(() => {
-    localStorage.setItem('hair_pro_bookmarks', JSON.stringify(bookmarks));
+    localStorage.setItem('eloria_bookmarks', JSON.stringify(bookmarks));
   }, [bookmarks]);
 
   // Auto-detect wide screens for two-page mode optional preference
   useEffect(() => {
-    const handleResize = () => {
-      if (window.innerWidth < 1024 && isTwoPageMode) {
-        setIsTwoPageMode(false);
-      }
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [isTwoPageMode]);
+    if (viewportSize.width < 1024 && isTwoPageMode) {
+      setIsTwoPageMode(false);
+    }
+  }, [viewportSize.width, isTwoPageMode]);
 
-  // Flip page handlers with animation
+  // Realistic 3D Page Turn navigation handler
   const goToPage = useCallback((newIndex: number, direction: 'next' | 'prev' = 'next') => {
-    if (newIndex < 0 || newIndex >= BOOK_PAGES.length) return;
-    setFlipAnimation(direction);
-    setIsCoverView(false);
-    
-    // Quick timeout to reset animation class
-    setTimeout(() => {
-      setCurrentPageIndex(newIndex);
-      setFlipAnimation(null);
-    }, 150);
-  }, []);
+    if (newIndex < 0 || newIndex >= paginatedPages.length) return;
+    if (newIndex === currentPageIndex && !isCoverView) return;
 
+    if (isCoverView) {
+      setIsCoverView(false);
+      setCurrentPageIndex(newIndex);
+      return;
+    }
+
+    // Trigger realistic 3D book leaf turn
+    setFlipTransition({
+      isFlipping: true,
+      direction,
+      fromIndex: currentPageIndex,
+      toIndex: newIndex
+    });
+
+    // Complete animation after 500ms
+    const timer = setTimeout(() => {
+      setCurrentPageIndex(newIndex);
+      setFlipTransition(prev => ({
+        ...prev,
+        isFlipping: false,
+        fromIndex: newIndex,
+        toIndex: newIndex
+      }));
+    }, 490);
+
+    return () => clearTimeout(timer);
+  }, [currentPageIndex, isCoverView, paginatedPages.length]);
+
+  // Navigation handlers with symbols ‹ (السابق) and › (التالي)
   const handleNext = useCallback(() => {
     if (isCoverView) {
       setIsCoverView(false);
       return;
     }
+    if (flipTransition.isFlipping) return;
     const increment = isTwoPageMode ? 2 : 1;
-    if (currentPageIndex + increment < BOOK_PAGES.length) {
+    if (currentPageIndex + increment < paginatedPages.length) {
       goToPage(currentPageIndex + increment, 'next');
     }
-  }, [isCoverView, isTwoPageMode, currentPageIndex, goToPage]);
+  }, [isCoverView, flipTransition.isFlipping, isTwoPageMode, currentPageIndex, paginatedPages.length, goToPage]);
 
   const handlePrev = useCallback(() => {
     if (isCoverView) return;
+    if (flipTransition.isFlipping) return;
     const decrement = isTwoPageMode ? 2 : 1;
     if (currentPageIndex - decrement >= 0) {
       goToPage(currentPageIndex - decrement, 'prev');
     } else {
       setIsCoverView(true);
     }
-  }, [isCoverView, isTwoPageMode, currentPageIndex, goToPage]);
+  }, [isCoverView, flipTransition.isFlipping, isTwoPageMode, currentPageIndex, goToPage]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -125,24 +216,31 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleNext, handlePrev]);
 
-  // Touch gesture handlers
+  // Touch gesture handlers for mobile realistic page flip
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartXRef.current = e.touches[0].clientX;
+    touchStartYRef.current = e.touches[0].clientY;
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartXRef.current === null) return;
+    if (touchStartXRef.current === null || touchStartYRef.current === null) return;
     const touchEndX = e.changedTouches[0].clientX;
+    const touchEndY = e.changedTouches[0].clientY;
     const deltaX = touchEndX - touchStartXRef.current;
+    const deltaY = touchEndY - touchStartYRef.current;
     
-    if (Math.abs(deltaX) > 50) {
+    // Check horizontal dominance to avoid vertical scroll conflict
+    if (Math.abs(deltaX) > 40 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
       if (deltaX < 0) {
+        // Swipe left in RTL moves forward to next page (›)
         handleNext();
       } else {
+        // Swipe right in RTL moves backward to previous page (‹)
         handlePrev();
       }
     }
     touchStartXRef.current = null;
+    touchStartYRef.current = null;
   };
 
   // Toggle Bookmark for current page
@@ -158,23 +256,83 @@ export default function App() {
 
   const isCurrentBookmarked = bookmarks.includes(currentPageIndex);
 
-  // Jump to next or previous chapter
-  const currentChapterNum = BOOK_PAGES[currentPageIndex]?.chapterNumber || 1;
-  const currentChapterObj = CHAPTERS_LIST.find(c => c.number === currentChapterNum);
+  // Dynamic Chapter Manifest mapped accurately to current paginated layout
+  const dynamicChapters: Chapter[] = useMemo(() => {
+    const chapterMap = new Map<number, { title: string; count: number; startIndex: number; category: string }>();
 
+    paginatedPages.forEach((p, index) => {
+      if (p.isFinalCoverPage) return;
+      const chNum = p.chapterNumber;
+      if (!chapterMap.has(chNum)) {
+        chapterMap.set(chNum, {
+          title: p.chapterTitle,
+          count: 1,
+          startIndex: index,
+          category: p.category
+        });
+      } else {
+        const existing = chapterMap.get(chNum)!;
+        existing.count += 1;
+      }
+    });
+
+    const chapters: Chapter[] = [];
+    chapterMap.forEach((val, num) => {
+      chapters.push({
+        number: num,
+        title: val.title,
+        pagesCount: val.count,
+        startPageIndex: val.startIndex,
+        description: `يحتوي على ${val.count} صفحة تعليمية`,
+        category: val.category
+      });
+    });
+
+    return chapters.length > 0 ? chapters : CHAPTERS_LIST;
+  }, [paginatedPages]);
+
+  // Current page details
+  const currentPage = paginatedPages[currentPageIndex] || paginatedPages[0];
+  const currentChapterNum = currentPage?.chapterNumber || 1;
+  const currentChapterObj = dynamicChapters.find(c => c.number === currentChapterNum) || CHAPTERS_LIST.find(c => c.number === currentChapterNum);
+
+  // Jump to next or previous chapter
   const goToNextChapter = () => {
-    const nextCh = CHAPTERS_LIST.find(c => c.number === currentChapterNum + 1);
-    if (nextCh) {
-      goToPage(nextCh.startPageIndex, 'next');
+    const nextChapterIdx = paginatedPages.findIndex(p => p.chapterNumber === currentChapterNum + 1);
+    if (nextChapterIdx !== -1) {
+      goToPage(nextChapterIdx, 'next');
+    } else if (paginatedPages.length > 0) {
+      goToPage(paginatedPages.length - 1, 'next');
     }
   };
 
   const goToPrevChapter = () => {
-    const prevCh = CHAPTERS_LIST.find(c => c.number === currentChapterNum - 1);
-    if (prevCh) {
-      goToPage(prevCh.startPageIndex, 'prev');
+    if (currentChapterNum <= 1) {
+      setIsCoverView(true);
+      return;
+    }
+    const prevChapterIdx = paginatedPages.findIndex(p => p.chapterNumber === currentChapterNum - 1);
+    if (prevChapterIdx !== -1) {
+      goToPage(prevChapterIdx, 'prev');
     } else {
       setIsCoverView(true);
+    }
+  };
+
+  // Direct TOC page selection (points directly to exact DisplayPage index)
+  const handleSelectFromTOC = (displayIndex: number) => {
+    if (displayIndex >= 0 && displayIndex < paginatedPages.length) {
+      goToPage(displayIndex, displayIndex > currentPageIndex ? 'next' : 'prev');
+    }
+  };
+
+  // Search selection (maps original BookPage topic index to DisplayPage)
+  const handleSelectFromSearch = (origIdx: number) => {
+    const targetIdx = paginatedPages.findIndex(p => p.originalPageIndex === origIdx);
+    if (targetIdx !== -1) {
+      goToPage(targetIdx, targetIdx > currentPageIndex ? 'next' : 'prev');
+    } else if (origIdx >= 0 && origIdx < paginatedPages.length) {
+      goToPage(origIdx, origIdx > currentPageIndex ? 'next' : 'prev');
     }
   };
 
@@ -191,14 +349,18 @@ export default function App() {
     }
   };
 
-  const progressPercent = Math.round(((currentPageIndex + 1) / BOOK_PAGES.length) * 100);
+  const progressPercent = Math.round(((currentPageIndex + 1) / Math.max(1, paginatedPages.length)) * 100);
+
+  // Unified Strict Fixed Dimension Classes for Page Frame
+  const singlePageFrameClass = "w-full max-w-2xl h-[560px] sm:h-[620px] md:h-[660px] lg:h-[700px] rounded-2xl shadow-xl shadow-[#E8B4C0]/20 border border-[#E8B4C0]/80 bg-gradient-to-b from-[#FFFDFE] to-[#FFF5F7] overflow-hidden relative";
+  const twoPageFrameClass = "w-full max-w-5xl h-[560px] sm:h-[620px] md:h-[660px] lg:h-[700px] rounded-2xl shadow-2xl shadow-[#E8B4C0]/25 border-2 border-[#E8B4C0]/70 bg-gradient-to-b from-[#FFFDFE] to-[#FFF5F7] overflow-hidden relative";
 
   return (
     <div 
       className="min-h-screen flex flex-col bg-[#FDF5F7] text-[#382127] selection:bg-[#F8D2DC] selection:text-[#5A1C2C] font-sans antialiased"
       dir="rtl"
     >
-      {/* 1. TOP ELEGANT NAVIGATION BAR - Feminine Light Pink */}
+      {/* 1. TOP ELEGANT NAVIGATION BAR */}
       <header className="sticky top-0 z-40 bg-[#FFF8FA]/95 backdrop-blur-md border-b border-[#F2CBD4] px-3 sm:px-6 py-2.5 shadow-2xs">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-2">
           {/* Logo & Book Brand */}
@@ -208,38 +370,41 @@ export default function App() {
               className="flex items-center gap-2 text-right hover:opacity-85 transition-opacity cursor-pointer group"
               title="العودة إلى الغلاف"
             >
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#D88A9C] via-[#C87386] to-[#A84C62] text-white flex items-center justify-center font-latin-title font-bold text-xs shadow-xs">
-                HP
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#D88A9C] via-[#C87386] to-[#A84C62] text-white flex items-center justify-center font-serif font-bold text-sm shadow-xs">
+                𝑬
               </div>
               <div className="hidden xs:block">
-                <span className="font-latin-title font-bold text-sm tracking-wider text-[#3D1E26] flex items-center gap-1 leading-none">
-                  HAIR PRO
+                <span className="font-serif font-bold text-sm tracking-wider text-[#3D1E26] flex items-center gap-1 leading-none">
+                  𝑬𝑳𝑶𝑹𝑰𝑨
                   <Heart className="w-2.5 h-2.5 text-[#D88A9C] fill-[#EAB1BF]" />
                 </span>
                 <span className="text-[10px] text-[#A66878] leading-none">
-                  الدليل التعليمي الأنثوي
+                  Hair • Care • Beauty
                 </span>
               </div>
             </button>
           </div>
 
           {/* Center: Current Location / Chapter Title */}
-          {!isCoverView && (
+          {!isCoverView && currentPage && (
             <div className="hidden md:flex items-center gap-2 text-xs text-[#782C3E] bg-[#FFF0F4] px-3.5 py-1.5 rounded-full border border-[#F2CCD6] shadow-2xs">
               <span className="font-bold text-[#A84C62]">
-                الفصل {currentChapterNum}:
+                {currentPage.isFinalCoverPage ? 'لوحة الختام' : `الفصل ${currentChapterNum}:`}
               </span>
               <span className="truncate max-w-[200px] lg:max-w-[300px]">
-                {currentChapterObj?.title.replace(/الفصل \d+ — /, '')}
+                {currentPage.isFinalCoverPage ? 'غلاف الختام الفني' : currentChapterObj?.title.replace(/الفصل \d+ — /, '')}
               </span>
               <span className="text-[#A66878] text-[10px] border-r border-[#F5CAD4] pr-2">
-                {currentPageIndex + 1} / {BOOK_PAGES.length}
+                {currentPageIndex + 1} / {paginatedPages.length}
               </span>
             </div>
           )}
 
           {/* Right Action Icons */}
           <div className="flex items-center gap-1 sm:gap-1.5">
+            {/* PWA Install ELORIA Button */}
+            <PWAInstallButton compact={true} />
+
             {/* Table of Contents Button */}
             <button
               onClick={() => setIsTOCOpen(true)}
@@ -319,12 +484,14 @@ export default function App() {
         </div>
       </header>
 
-      {/* 2. MAIN READING STAGE */}
+      {/* 2. MAIN READING STAGE WITH REALISTIC 3D PAGE FLIP */}
       <main 
         ref={bookContainerRef}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
-        className="flex-1 flex flex-col justify-center items-center p-2 sm:p-4 md:p-6 lg:p-8 max-w-7xl mx-auto w-full relative"
+        className={`flex-1 flex flex-col justify-center items-center w-full relative select-none ${
+          isCoverView ? 'p-0 max-w-none' : 'p-2 sm:p-4 md:p-6 lg:p-8 max-w-7xl mx-auto'
+        }`}
       >
         {isCoverView ? (
           <BookCover 
@@ -333,82 +500,169 @@ export default function App() {
           />
         ) : (
           <div className="w-full flex-1 flex flex-col justify-center items-center book-perspective">
-            {/* Desktop Flip Stage */}
-            <div 
-              className={`w-full max-w-5xl transition-all duration-300 ease-out ${
-                flipAnimation === 'next' ? 'scale-[0.985] opacity-90' : 
-                flipAnimation === 'prev' ? 'scale-[0.985] opacity-90' : 'scale-100 opacity-100'
-              }`}
-            >
-              {isTwoPageMode && window.innerWidth >= 1024 ? (
-                /* TWO-PAGE SPREAD (Delicate Pink Open Book Simulation) */
-                <div className="grid grid-cols-2 gap-0 rounded-2xl overflow-hidden shadow-2xl shadow-[#E8B4C0]/25 border-2 border-[#E8B4C0]/70 bg-gradient-to-b from-[#FFFDFE] to-[#FFF5F7] relative">
-                  {/* Central Spine Fold Shadow with rose undertones */}
-                  <div className="absolute top-0 bottom-0 left-1/2 -ml-3 w-6 pointer-events-none z-10 bg-gradient-to-r from-black/8 via-transparent to-black/8 shadow-inner" />
+            {isTwoPageMode && viewportSize.width >= 1024 ? (
+              /* TWO-PAGE SPREAD - STRICT FIXED DIMENSIONS */
+              <div className={twoPageFrameClass}>
+                <div className="grid grid-cols-2 gap-0 w-full h-full relative">
+                  {/* Central Spine Fold Shadow */}
+                  <div className="absolute top-0 bottom-0 left-1/2 -ml-3 w-6 pointer-events-none z-20 bg-gradient-to-r from-black/8 via-transparent to-black/8 shadow-inner" />
 
                   {/* Right Page (RTL: Page 1) */}
-                  <div className="page-spine-shadow-right border-l border-[#F5CCD6] overflow-y-auto max-h-[80vh] p-1">
-                    <PageRenderer 
-                      page={BOOK_PAGES[currentPageIndex]} 
-                      currentPageNumber={currentPageIndex + 1}
-                      totalPages={BOOK_PAGES.length}
-                    />
+                  <div className="page-spine-shadow-right border-l border-[#F5CCD6] p-1 h-full w-full">
+                    {currentPage && (
+                      <PageRenderer 
+                        page={currentPage} 
+                        currentPageNumber={currentPageIndex + 1}
+                        totalPages={paginatedPages.length}
+                      />
+                    )}
                   </div>
 
                   {/* Left Page (RTL: Page 2 if exists) */}
-                  <div className="page-spine-shadow-left overflow-y-auto max-h-[80vh] p-1">
-                    {currentPageIndex + 1 < BOOK_PAGES.length ? (
+                  <div className="page-spine-shadow-left p-1 h-full w-full">
+                    {currentPageIndex + 1 < paginatedPages.length ? (
                       <PageRenderer 
-                        page={BOOK_PAGES[currentPageIndex + 1]} 
+                        page={paginatedPages[currentPageIndex + 1]} 
                         currentPageNumber={currentPageIndex + 2}
-                        totalPages={BOOK_PAGES.length}
+                        totalPages={paginatedPages.length}
                       />
                     ) : (
-                      <div className="h-full flex flex-col items-center justify-center p-8 text-center text-[#8C4A5A]">
+                      <div className="h-full w-full flex flex-col items-center justify-center p-8 text-center text-[#8C4A5A] bg-gradient-to-b from-[#FFFDFE] to-[#FFF5F7] rounded-xl border border-[#F5D5DC]">
                         <Sparkles className="w-8 h-8 text-[#D88A9C] mb-3" />
-                        <h3 className="font-bold text-base text-[#3D1E26]">نهاية الكتاب التعليمي</h3>
-                        <p className="text-xs text-[#7A3E4E] mt-1">تهانينا على إتمام فصول HAIR PRO الـ 27!</p>
+                        <h3 className="font-bold text-base text-[#3D1E26]">نهاية كتاب ELORIA</h3>
+                        <p className="text-xs text-[#7A3E4E] mt-1">تهانينا على إتمام فصول 𝑬𝑳𝑶𝑹𝑰𝑨 الـ 27 والتصفيف الاحترافي!</p>
                       </div>
                     )}
                   </div>
                 </div>
-              ) : (
-                /* SINGLE PAGE (Mobile & Focused Mode) */
-                <div className="w-full max-w-2xl mx-auto rounded-2xl overflow-hidden shadow-xl shadow-[#E8B4C0]/20 border border-[#E8B4C0]/80 bg-gradient-to-b from-[#FFFDFE] to-[#FFF5F7] min-h-[500px]">
-                  <PageRenderer 
-                    page={BOOK_PAGES[currentPageIndex]} 
-                    currentPageNumber={currentPageIndex + 1}
-                    totalPages={BOOK_PAGES.length}
-                  />
-                </div>
-              )}
-            </div>
+              </div>
+            ) : (
+              /* SINGLE PAGE (Mobile & Focused Mode) - REALISTIC 3D FLIP */
+              <div className={singlePageFrameClass}>
+                {flipTransition.isFlipping ? (
+                  /* 3D Realistic Turning Leaf Stage */
+                  <div className="book-leaf-wrapper">
+                    {/* Base Page (revealed underneath) */}
+                    <div className="absolute inset-0 w-full h-full">
+                      {flipTransition.direction === 'next' ? (
+                        <div className="w-full h-full relative">
+                          <PageRenderer 
+                            page={paginatedPages[flipTransition.toIndex]} 
+                            currentPageNumber={flipTransition.toIndex + 1}
+                            totalPages={paginatedPages.length}
+                          />
+                          <div className="base-page-shadow" />
+                        </div>
+                      ) : (
+                        <div className="w-full h-full relative">
+                          <PageRenderer 
+                            page={paginatedPages[flipTransition.fromIndex]} 
+                            currentPageNumber={flipTransition.fromIndex + 1}
+                            totalPages={paginatedPages.length}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Flipping Leaf (rotating with 3D perspective and paper shadow) */}
+                    <div 
+                      className={`book-page-leaf ${
+                        flipTransition.direction === 'next' 
+                          ? 'page-turn-next-leaf' 
+                          : 'page-turn-prev-leaf'
+                      }`}
+                    >
+                      {flipTransition.direction === 'next' ? (
+                        <div className="w-full h-full relative bg-[#FFF8FA] rounded-2xl">
+                          <PageRenderer 
+                            page={paginatedPages[flipTransition.fromIndex]} 
+                            currentPageNumber={flipTransition.fromIndex + 1}
+                            totalPages={paginatedPages.length}
+                          />
+                          <div className="leaf-curl-shadow" />
+                        </div>
+                      ) : (
+                        <div className="w-full h-full relative bg-[#FFF8FA] rounded-2xl">
+                          <PageRenderer 
+                            page={paginatedPages[flipTransition.toIndex]} 
+                            currentPageNumber={flipTransition.toIndex + 1}
+                            totalPages={paginatedPages.length}
+                          />
+                          <div className="leaf-curl-shadow" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  /* Resting Page */
+                  <div className="w-full h-full">
+                    {currentPage && (
+                      <PageRenderer 
+                        page={currentPage} 
+                        currentPageNumber={currentPageIndex + 1}
+                        totalPages={paginatedPages.length}
+                      />
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
+        {/* SMART LAZY LOADING PRE-WARMER CACHE:
+            Prepares only the previous page and next page in advance offscreen,
+            so styles, layouts, fonts, and DOM trees are pre-compiled and primed
+            before any flip gesture occurs, guaranteeing 60fps buttery fluidity on all devices.
+        */}
+        <div 
+          aria-hidden="true" 
+          className="hidden pointer-events-none opacity-0 fixed -top-[9999px] -left-[9999px] w-[600px] h-[600px] overflow-hidden select-none"
+        >
+          {currentPageIndex > 0 && paginatedPages[currentPageIndex - 1] && (
+            <PageRenderer 
+              key={`lazy-prev-${currentPageIndex - 1}`}
+              page={paginatedPages[currentPageIndex - 1]}
+              currentPageNumber={currentPageIndex}
+              totalPages={paginatedPages.length}
+            />
+          )}
+          {currentPageIndex + 1 < paginatedPages.length && (
+            <PageRenderer 
+              key={`lazy-next-${currentPageIndex + 1}`}
+              page={paginatedPages[currentPageIndex + 1]}
+              currentPageNumber={currentPageIndex + 2}
+              totalPages={paginatedPages.length}
+            />
+          )}
+        </div>
       </main>
 
-      {/* 3. BOTTOM READING CONTROLS & DYNAMIC PAGINATION BAR */}
+      {/* 3. BOTTOM READING CONTROLS - SYMBOLS ONLY: ‹ & › */}
       {!isCoverView && (
         <footer className="sticky bottom-0 z-30 bg-[#FFF8FA]/95 backdrop-blur-md border-t border-[#F2CBD4] px-3 sm:px-6 py-2.5">
           <div className="max-w-4xl mx-auto flex flex-col gap-2">
             {/* Navigation Buttons and Slider */}
             <div className="flex items-center justify-between gap-2 sm:gap-4">
-              {/* Previous Page Button (In RTL, ChevronRight moves backward) */}
-              <div className="flex items-center gap-1">
+              {/* Previous Controls Group */}
+              <div className="flex items-center gap-1.5">
                 <button
                   onClick={goToPrevChapter}
-                  disabled={currentChapterNum <= 1}
-                  className="p-2 rounded-xl bg-[#FFF0F4] border border-[#F2CCD6] text-[#632938] hover:bg-[#FCE5EB] disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                  disabled={currentChapterNum <= 1 && currentPageIndex === 0}
+                  className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-[#FFF0F4] border border-[#F2CCD6] text-[#632938] hover:bg-[#FCE5EB] disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer flex items-center justify-center"
                   title="الفصل السابق"
                 >
                   <ChevronsRight className="w-4 h-4 text-[#C86A80]" />
                 </button>
+
+                {/* السابق: ‹ (الرمز فقط بدون أي نص) */}
                 <button
                   onClick={handlePrev}
-                  className="px-3 sm:px-4 py-2 rounded-xl bg-[#FFF0F4] border border-[#F2CCD6] text-[#632938] font-bold text-xs sm:text-sm hover:bg-[#FCE5EB] active:scale-95 transition-all flex items-center gap-1 cursor-pointer"
+                  disabled={currentPageIndex <= 0}
+                  className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-[#FFF0F4] border border-[#F2CCD6] text-[#632938] hover:bg-[#FCE5EB] active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed transition-all flex items-center justify-center cursor-pointer shadow-2xs font-serif text-2xl font-bold leading-none select-none"
+                  aria-label="السابق"
+                  title="‹"
                 >
-                  <ChevronRight className="w-4 h-4 text-[#C86A80]" />
-                  <span>السابق</span>
+                  ‹
                 </button>
               </div>
 
@@ -417,31 +671,34 @@ export default function App() {
                 <input
                   type="range"
                   min="0"
-                  max={BOOK_PAGES.length - 1}
+                  max={Math.max(0, paginatedPages.length - 1)}
                   value={currentPageIndex}
-                  onChange={(e) => goToPage(parseInt(e.target.value, 10))}
+                  onChange={(e) => goToPage(parseInt(e.target.value, 10), parseInt(e.target.value, 10) > currentPageIndex ? 'next' : 'prev')}
                   className="w-full accent-[#D88A9C] h-1.5 bg-[#F5D5DC] rounded-lg cursor-pointer"
-                  title={`انتقال سريع (صفحة ${currentPageIndex + 1})`}
+                  title={`صفحة ${currentPageIndex + 1}`}
                 />
                 <div className="shrink-0 text-[11px] font-bold text-[#8C384E] bg-[#FCE8ED] px-2.5 py-1 rounded-md border border-[#F2CCD6]">
-                  {currentPageIndex + 1} / {BOOK_PAGES.length}
+                  {currentPageIndex + 1} / {paginatedPages.length}
                 </div>
               </div>
 
-              {/* Next Page Button (In RTL, ChevronLeft moves forward) */}
-              <div className="flex items-center gap-1">
+              {/* Next Controls Group */}
+              <div className="flex items-center gap-1.5">
+                {/* التالي: › (الرمز فقط بدون أي نص) */}
                 <button
                   onClick={handleNext}
-                  disabled={currentPageIndex >= BOOK_PAGES.length - 1}
-                  className="px-3 sm:px-4 py-2 rounded-xl bg-gradient-to-r from-[#D88A9C] via-[#C87386] to-[#B75B6F] text-white font-bold text-xs sm:text-sm hover:shadow-md hover:shadow-[#D88A9C]/30 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-1 cursor-pointer"
+                  disabled={currentPageIndex >= paginatedPages.length - 1}
+                  className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-r from-[#D88A9C] via-[#C87386] to-[#B75B6F] text-white hover:shadow-md hover:shadow-[#D88A9C]/30 active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed transition-all flex items-center justify-center cursor-pointer shadow-2xs font-serif text-2xl font-bold leading-none select-none"
+                  aria-label="التالي"
+                  title="›"
                 >
-                  <span>التالي</span>
-                  <ChevronLeft className="w-4 h-4" />
+                  ›
                 </button>
+
                 <button
                   onClick={goToNextChapter}
-                  disabled={currentChapterNum >= 27}
-                  className="p-2 rounded-xl bg-[#FFF0F4] border border-[#F2CCD6] text-[#632938] hover:bg-[#FCE5EB] disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                  disabled={currentPageIndex >= paginatedPages.length - 1}
+                  className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-[#FFF0F4] border border-[#F2CCD6] text-[#632938] hover:bg-[#FCE5EB] disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer flex items-center justify-center"
                   title="الفصل التالي"
                 >
                   <ChevronsLeft className="w-4 h-4 text-[#C86A80]" />
@@ -456,7 +713,7 @@ export default function App() {
                 تقدم القراءة: {progressPercent}%
               </span>
               <span className="font-mono text-[9px] opacity-60 font-semibold">{BOOK_WATERMARK}</span>
-              <span>انقري أو اسحبي للتنقل بين الصفحات</span>
+              <span>اسحبي أو انقري للتنقل</span>
             </div>
           </div>
         </footer>
@@ -466,17 +723,17 @@ export default function App() {
       <TableOfContents
         isOpen={isTOCOpen}
         onClose={() => setIsTOCOpen(false)}
-        chapters={CHAPTERS_LIST}
-        allPages={BOOK_PAGES}
+        chapters={dynamicChapters}
+        allPages={paginatedPages}
         currentPageIndex={currentPageIndex}
-        onSelectPage={(idx) => goToPage(idx)}
+        onSelectPage={handleSelectFromTOC}
         bookmarks={bookmarks}
       />
 
       <SearchModal
         isOpen={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}
-        onSelectPage={(idx) => goToPage(idx)}
+        onSelectPage={handleSelectFromSearch}
       />
     </div>
   );

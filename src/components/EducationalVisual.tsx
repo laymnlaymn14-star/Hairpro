@@ -61,7 +61,7 @@ export const EducationalVisual: React.FC<EducationalVisualProps> = ({ visual }) 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] text-[#422129]">
             <div className="bg-[#FFFDFE] p-2.5 rounded-lg border border-[#F2CCD6]">
               <span className="font-bold text-[#A8586B] block mb-0.5">1. Cuticle (الحراشف)</span>
-              <span>درع الحماية الخارجي؛ كي تكون مسدودة يلمع الشعر بريقاً ناعماً.</span>
+              <span>درع الحماية الخارجي؛ عندما تكون الحراشف ملساء ومغلقة يكتسب الشعر لمعانًا فائقًا ونعومة حريرية.</span>
             </div>
             <div className="bg-[#FFFDFE] p-2.5 rounded-lg border border-[#F2CCD6]">
               <span className="font-bold text-[#8C384E] block mb-0.5">2. Cortex (اللب)</span>
@@ -176,7 +176,7 @@ export const EducationalVisual: React.FC<EducationalVisualProps> = ({ visual }) 
               <AlertTriangle className="w-3.5 h-3.5 text-[#C62828]" />
               الزاوية الخاطئة (عمودياً أو للأعلى)
             </span>
-            <p className="text-[10px] text-[#691825]">نفخ الهواء للأعلى يفتح الحراشف، يطير الشعيرات القصيرة، ويترك الشعر باهتاً ومقرمشاً.</p>
+            <p className="text-[10px] text-[#691825]">توجيه تدفق الهواء للأعلى يفتح حراشف الشعرة، مما يسبب تطاير الشعيرات وتطايرها ويترك الشعر باهتًا وعرضة للتشابك.</p>
           </div>
         </div>
       )}

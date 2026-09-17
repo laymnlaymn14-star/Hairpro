@@ -1,12 +1,12 @@
 import React from 'react';
-import { Chapter, BookPage } from '../types';
-import { X, BookOpen, ChevronLeft, Bookmark, Heart } from 'lucide-react';
+import { Chapter, BookPage, DisplayPage } from '../types';
+import { X, BookOpen, ChevronLeft, Bookmark, Heart, Image as ImageIcon } from 'lucide-react';
 
 interface TableOfContentsProps {
   isOpen: boolean;
   onClose: () => void;
   chapters: Chapter[];
-  allPages: BookPage[];
+  allPages: (BookPage | DisplayPage)[];
   currentPageIndex: number;
   onSelectPage: (index: number) => void;
   bookmarks: number[];
@@ -40,7 +40,7 @@ export const TableOfContents: React.FC<TableOfContentsProps> = ({
                 فهرس الكتاب (27 فصلاً)
                 <Heart className="w-3 h-3 text-[#D88A9C] fill-[#EAB1BF]" />
               </h3>
-              <p className="text-[11px] text-[#8C5260]">إجمالي 118 صفحة تعليمية مصممة بأناقة</p>
+              <p className="text-[11px] text-[#8C5260]">إجمالي {allPages.length} صفحة تعليمية مصممة بأناقة</p>
             </div>
           </div>
           <button
@@ -133,6 +133,33 @@ export const TableOfContents: React.FC<TableOfContentsProps> = ({
               </div>
             );
           })}
+
+          {/* Dedicated Final Cover link */}
+          {allPages.length > 0 && (
+            <div className="rounded-xl border border-[#F2CCD6] bg-gradient-to-r from-[#FFF0F4] to-[#FCE8ED] p-3">
+              <button
+                onClick={() => {
+                  onSelectPage(allPages.length - 1);
+                  onClose();
+                }}
+                className="w-full flex items-center justify-between text-right cursor-pointer"
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="w-6 h-6 rounded-full bg-[#EAB1BF] text-white flex items-center justify-center shrink-0">
+                    <ImageIcon className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-[#422129]">لوحة غلاف الختام الفنية</h4>
+                    <span className="text-[10px] text-[#A66878]">خاتمة الكتاب — ELORIA</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 text-[#A66878] text-[11px]">
+                  <span>ص {allPages.length}</span>
+                  <ChevronLeft className="w-3.5 h-3.5 text-[#C86A80]" />
+                </div>
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

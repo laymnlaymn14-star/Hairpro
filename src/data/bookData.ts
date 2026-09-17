@@ -5,8 +5,8 @@ import { PART_3_PAGES } from './chapters/part3';
 import { PART_4_PAGES } from './chapters/part4';
 import { PART_5_PAGES } from './chapters/part5';
 
-// Mandatory Watermark per specification
-export const BOOK_WATERMARK = "fifi. bk";
+// Watermark per specification
+export const BOOK_WATERMARK = "𝒻𝒾𝒻𝒾";
 
 // Master array of all pages in the book
 export const BOOK_PAGES: BookPage[] = [
